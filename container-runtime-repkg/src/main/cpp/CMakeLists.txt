@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.4.1)
 set(CMAKE_CXX_STANDARD 14)
 
-
 message("Building ${LIB_NAME} for Android(${CMAKE_SYSTEM_PROCESSOR})...")
 ENABLE_LANGUAGE(ASM)
 
