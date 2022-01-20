@@ -4,7 +4,7 @@ import com.android.apksig.ApkSigner;
 import com.android.apksig.apk.MinSdkVersionException;
 import com.android.apksigner.PasswordRetriever;
 import com.android.apksigner.SignerParams;
-import com.beust.jcommander.internal.Lists;
+import com.google.common.collect.Lists;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
@@ -39,14 +39,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 
-import brut.androlib.src.SmaliBuilder;
-import brut.directory.ExtFile;
 
 public class RDPBuilder {
     //TODO RDP之后，需要修改序列号
@@ -127,6 +129,10 @@ public class RDPBuilder {
             tempDir.mkdirs();
         }
 
+        ExecutorService threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+
+
+        List<Callable<File>> callables = Lists.newLinkedList();
         for (File smaliDir : smaliDirs) {
             String name = smaliDir.getName();
             String fileName = null;
@@ -137,10 +143,19 @@ public class RDPBuilder {
             }
             if (fileName != null) {
                 File tempDex = new File(tempDir, fileName);
-                System.out.println("build smali dir: " + smaliDir.getAbsolutePath());
-                SmaliBuilder.build(new ExtFile(smaliDir), tempDex, Opcodes.getDefault().api);
-                addZipData(tempDex, zipOutputStream, fileName, zipEntryMap);
+                Callable<File> callable = () -> {
+                    System.out.println("build smali dir: " + smaliDir.getAbsolutePath());
+                    SmaliBuilder.build(smaliDir, tempDex, Opcodes.getDefault().api, false);
+                    return tempDex;
+                };
+                callables.add(callable);
             }
+        }
+        List<Future<File>> futures = threadPool.invokeAll(callables);
+        threadPool.shutdown();
+        for (Future<File> future : futures) {
+            File file = future.get();
+            addZipData(file, zipOutputStream, file.getName(), zipEntryMap);
         }
 
         zipOutputStream.closeEntry();

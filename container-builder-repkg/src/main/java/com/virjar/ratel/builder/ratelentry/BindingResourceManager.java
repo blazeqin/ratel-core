@@ -1,5 +1,6 @@
 package com.virjar.ratel.builder.ratelentry;
 
+import com.virjar.ratel.allcommon.BuildEnv;
 import com.virjar.ratel.allcommon.ClassNames;
 import com.virjar.ratel.allcommon.NewConstants;
 import com.virjar.ratel.allcommon.ReflectUtil;
@@ -34,8 +35,12 @@ public class BindingResourceManager {
         URL runtimeUrl = BindingResourceManager.class.getClassLoader().getResource(NewConstants.BUILDER_RESOURCE_LAYOUT.RUNTIME_JAR_FILE.getNAME());
         if (runtimeUrl == null) {
             // 请注意，这个分支只有AndroidStudio调试的时候才会走
-            // 发布版本和dex
-            doOptimizeExtract(workDir);
+            if (BuildEnv.DEBUG) {
+                // 生产环境这个代码分支会被优化掉
+                doOptimizeExtract(workDir);
+            } else {
+                throw new IllegalStateException("can not run doOptimizeExtract on production env");
+            }
             return;
         }
         directExtract(workDir);
@@ -65,10 +70,13 @@ public class BindingResourceManager {
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         try (ZipOutputStream zipOutputStream = new ZipOutputStream(byteArrayOutputStream)) {
             for (NewConstants.BUILDER_RESOURCE_LAYOUT layout : NewConstants.BUILDER_RESOURCE_LAYOUT.values()) {
-                if (layout.isRaw() && !layout.isDir()) {
+                if (!layout.isDir()) {
                     zipOutputStream.putNextEntry(new ZipEntry(layout.getNAME()));
                     InputStream inputStream = classLoader.getResourceAsStream(layout.getNAME());
                     if (inputStream == null) {
+                        if (!layout.isOnlyDev()) {
+                            continue;
+                        }
                         throw new IOException("can not find resource: " + layout.getNAME());
                     }
                     IOUtils.copy(inputStream, zipOutputStream);
@@ -77,7 +85,6 @@ public class BindingResourceManager {
         }
         File tempFile = File.createTempFile("fake-binding-resource-builder", ".jar");
         FileUtils.writeByteArrayToFile(tempFile, byteArrayOutputStream.toByteArray());
-
         File helperJar = new File(workDir, NewConstants.BUILDER_RESOURCE_LAYOUT.BUILDER_HELPER_NAME.getNAME());
         FileUtils.forceMkdirParent(helperJar);
 

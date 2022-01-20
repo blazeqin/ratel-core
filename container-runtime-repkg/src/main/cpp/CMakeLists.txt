@@ -61,7 +61,31 @@ set(RATEL_NATIVE_SOURCE
         MapHide/pmparser.c
         MapHide/MapsHideHandler.cpp
 
-
+        # bytehook
+        bhook/bh_cfi.c
+        bhook/bh_core.c
+        bhook/bh_dl.c
+        bhook/bh_dl_iterate.c
+        bhook/bh_dl_monitor.c
+        bhook/bh_elf.c
+        bhook/bh_elf_manager.c
+        bhook/bh_hook.c
+        bhook/bh_hook_manager.c
+        bhook/bh_jni.c
+        bhook/bh_linker.c
+        bhook/bh_log.c
+        bhook/bh_recorder.c
+        bhook/bh_sleb128.c
+        bhook/bh_task.c
+        bhook/bh_task_manager.c
+        bhook/bh_trampo.c
+        bhook/bh_trampo_arm.c
+        bhook/bh_trampo_arm64.c
+        bhook/bh_trampo_x86.c
+        bhook/bh_trampo_x86_64.c
+        bhook/bh_util.c
+        bhook/bytehook.c
+        bhook/bytesig.c
         )
 include_directories(Foundation)
 include_directories(Jni)
@@ -69,6 +93,7 @@ include_directories(arthook)
 include_directories(xhook)
 include_directories(unpack)
 include_directories(MapHide)
+include_directories(bhook)
 include_directories(./)
 
 # add_definitions(-std=c++11)
@@ -112,8 +137,46 @@ set(HIDDEN_NATIVE_SOURCE
         MapHide/pmparser.c
         MapHide/MapsHideHandler.cpp
         MapHide/nativeHideJni.cpp
-#        Jni/Helper.cpp
+        #        Jni/Helper.cpp
         )
 add_library("ratelhide" SHARED ${HIDDEN_NATIVE_SOURCE})
 
+
 target_link_libraries("ratelhide" log)
+
+include_directories(zipalign)
+set(ZIP_ALIGN_SOURCE
+        zipalign/ziparchive/zip_archive.cc
+        zipalign/ziparchive/zip_writer.cc
+
+        zipalign/zopfli/blocksplitter.c
+        zipalign/zopfli/cache.c
+        zipalign/zopfli/deflate.c
+        zipalign/zopfli/gzip_container.c
+        zipalign/zopfli/hash.c
+        zipalign/zopfli/katajainen.c
+        zipalign/zopfli/lz77.c
+        zipalign/zopfli/squeeze.c
+        zipalign/zopfli/tree.c
+        zipalign/zopfli/util.c
+        zipalign/zopfli/zlib_container.c
+        zipalign/zopfli/zopfli_bin.c
+
+        zipalign/utils/FileMap.cpp
+        zipalign/utils/SharedBuffer.cpp
+        zipalign/utils/VectorImpl.cpp
+        zipalign/utils/safe_iop.c
+
+        zipalign/android-base/file.cpp
+        zipalign/android-base/logging.cpp
+        zipalign/android-base/strings.cpp
+        zipalign/android-base/utf8.cpp
+
+        zipalign/ZipAlign.cpp
+        zipalign/ZipEntry.cpp
+        zipalign/ZipFile.cpp
+        )
+
+add_executable("zipalign.so" ${ZIP_ALIGN_SOURCE})
+target_link_libraries("zipalign.so" log)
+target_link_libraries("zipalign.so" z)

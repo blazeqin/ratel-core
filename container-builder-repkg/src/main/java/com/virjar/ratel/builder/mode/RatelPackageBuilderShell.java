@@ -3,8 +3,8 @@ package com.virjar.ratel.builder.mode;
 
 import com.virjar.ratel.allcommon.Constants;
 import com.virjar.ratel.builder.BuildParamMeta;
-import com.virjar.ratel.builder.Param;
 import com.virjar.ratel.builder.Util;
+import com.virjar.ratel.builder.ratelentry.BuilderContext;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.io.IOUtils;
@@ -21,11 +21,11 @@ import java.io.IOException;
 import java.util.Enumeration;
 
 public class RatelPackageBuilderShell {
-    public static void handleTask(File workDir, Param param, BuildParamMeta buildParamMeta,
+    public static void handleTask(File workDir, BuilderContext context, BuildParamMeta buildParamMeta,
                                   CommandLine cmd, ZipOutputStream zos
     ) throws IOException {
 
-        ZipFile originAPKZip = new ZipFile(param.originApk);
+        ZipFile originAPKZip = context.infectApk.zipFile;
         Enumeration<ZipEntry> entries = originAPKZip.getEntries();
         while (entries.hasMoreElements()) {
             ZipEntry originEntry = entries.nextElement();
@@ -57,8 +57,21 @@ public class RatelPackageBuilderShell {
                 zos.write(bytes);
                 continue;
             }
-            zos.putNextEntry(new ZipEntry(originEntry));
-            zos.write(IOUtils.toByteArray(originAPKZip.getInputStream(originEntry)));
+            // 可能用户排除一些arch
+            boolean needCopy = false;
+            if (!entryName.startsWith("lib") || context.arch.isEmpty()) {
+                needCopy = true;
+            } else {
+                for (String str : context.arch) {
+                    if (entryName.startsWith("lib/" + str)) {
+                        needCopy = true;
+                    }
+                }
+            }
+            if (needCopy) {
+                zos.putNextEntry(new ZipEntry(originEntry));
+                zos.write(IOUtils.toByteArray(originAPKZip.getInputStream(originEntry)));
+            }
         }
         //close
         originAPKZip.close();

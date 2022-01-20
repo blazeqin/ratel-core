@@ -1,8 +1,10 @@
 package com.virjar.ratel.builder.helper.bro;
 
+import com.beust.jcommander.internal.Sets;
 import com.google.common.io.Files;
 import com.virjar.ratel.allcommon.NewConstants;
 import com.virjar.ratel.builder.helper.apk2jar.APK2Jar;
+import com.virjar.ratel.builder.helper.proguard.OptimizeBuilderClass;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
@@ -28,7 +30,9 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 public class OptimizeBuilderResource {
@@ -37,6 +41,7 @@ public class OptimizeBuilderResource {
         options.addOption(new Option("i", "input", true, "input apk file"));
         options.addOption(new Option("o", "output", true, "output jar file"));
         options.addOption(new Option("h", "help", false, "show help message"));
+        options.addOption(new Option("", "rdp", false, "if optimize rdp jar"));
 
         DefaultParser parser = new DefaultParser();
         CommandLine cmd = parser.parse(options, args, false);
@@ -52,10 +57,10 @@ public class OptimizeBuilderResource {
         Map<NewConstants.BUILDER_RESOURCE_LAYOUT, byte[]> optimizeData = null;
         ByteArrayOutputStream byteArrayOutputStream;
         try (ZipFile zipFile = new ZipFile(builderJarInputFile)) {
-            optimizeData = handleJarInput(zipFile);
+            optimizeData = handleJarInput(zipFile, cmd.hasOption("rdp"));
 
             if (output.endsWith("/")) {
-                writeDataToDir(output, optimizeData);
+                writeDataToDir(output, zipFile, optimizeData);
                 return;
             }
             if (!output.endsWith(".jar")) {
@@ -70,6 +75,12 @@ public class OptimizeBuilderResource {
     }
 
     private static void writeDataToNewJar(ZipOutputStream zos, ZipFile zipFile, Map<NewConstants.BUILDER_RESOURCE_LAYOUT, byte[]> optimizeData) throws IOException {
+        Set<String> filterResources = Sets.newHashSet();
+        for (NewConstants.BUILDER_RESOURCE_LAYOUT layout : NewConstants.BUILDER_RESOURCE_LAYOUT.values()) {
+            if (layout.isOnlyDev()) {
+                filterResources.add(layout.getNAME());
+            }
+        }
         HashMap<String, byte[]> data = new HashMap<>();
         for (NewConstants.BUILDER_RESOURCE_LAYOUT layout : optimizeData.keySet()) {
             data.put(layout.getNAME(), optimizeData.get(layout));
@@ -77,9 +88,7 @@ public class OptimizeBuilderResource {
         Enumeration<ZipEntry> entries = zipFile.getEntries();
         while (entries.hasMoreElements()) {
             ZipEntry zipEntry = entries.nextElement();
-            if (NewConstants.BUILDER_RESOURCE_LAYOUT.BUILDER_HELPER_NAME.getNAME().equals(zipEntry.getName())) {
-                // 对于jar包本身，在构建工具完成优化之后，则不在需要helper了，此时需要把helper干掉
-                // 但是在开发环境下，由于需要支持AndroidStudio的单步调试，这个时候需要把helper包含在其中，使用helper在调试的时候进行binder resource handling
+            if (filterResources.contains(zipEntry.getName())) {
                 continue;
             }
             zos.putNextEntry(new ZipEntry(zipEntry));
@@ -98,17 +107,36 @@ public class OptimizeBuilderResource {
         }
     }
 
-    private static void writeDataToDir(String output, Map<NewConstants.BUILDER_RESOURCE_LAYOUT, byte[]> optimizeData) throws IOException {
+    private static void writeDataToDir(String output, ZipFile zipFile, Map<NewConstants.BUILDER_RESOURCE_LAYOUT, byte[]> optimizeData) throws IOException {
         //释放到文件夹下，这个时候应该是调试模式下，
         File dir = new File(output);
+        Set<String> released = new HashSet<>();
         for (NewConstants.BUILDER_RESOURCE_LAYOUT resource : optimizeData.keySet()) {
             final File file = new File(dir, resource.getNAME());
             FileUtils.forceMkdirParent(file);
             FileUtils.writeByteArrayToFile(file, optimizeData.get(resource));
+            released.add(resource.getNAME());
+        }
+
+        for (NewConstants.BUILDER_RESOURCE_LAYOUT resource : NewConstants.BUILDER_RESOURCE_LAYOUT.values()) {
+            if (resource.isDir() || resource.isOnlyDev()) {
+                continue;
+            }
+            if (released.contains(resource.getNAME())) {
+                continue;
+            }
+
+            ZipEntry entry = zipFile.getEntry(resource.getNAME());
+            if (entry == null) {
+                continue;
+            }
+            File file = new File(dir, resource.getNAME());
+            FileUtils.forceMkdirParent(file);
+            FileUtils.copyInputStreamToFile(zipFile.getInputStream(entry), file);
         }
     }
 
-    private static Map<NewConstants.BUILDER_RESOURCE_LAYOUT, byte[]> handleJarInput(ZipFile zipFile) throws Exception {
+    private static Map<NewConstants.BUILDER_RESOURCE_LAYOUT, byte[]> handleJarInput(ZipFile zipFile, boolean optimizeRDPJar) throws Exception {
         Map<NewConstants.BUILDER_RESOURCE_LAYOUT, byte[]> optimizeData = new HashMap<>();
 
         // runtime 核心文件
@@ -130,10 +158,31 @@ public class OptimizeBuilderResource {
                 NewConstants.BUILDER_RESOURCE_LAYOUT.TEMPLATE_DEX_FILE,
                 new TemplateApkOptimizer(), optimizeData);
 
+        //RDP构建jar文件，进行一次代码优化，也是为了瘦身
+        handleResource(zipFile, NewConstants.BUILDER_RESOURCE_LAYOUT.RDP_JAR_FILE,
+                NewConstants.BUILDER_RESOURCE_LAYOUT.RDP_JAR_FILE,
+                optimizeRDPJar ? OptimizeBuilderResource::optimizeRDPJar : input -> input, optimizeData);
+
+        handleResource(zipFile, NewConstants.BUILDER_RESOURCE_LAYOUT.RDP_GIT_IGNORE_1,
+                NewConstants.BUILDER_RESOURCE_LAYOUT.RDP_GIT_IGNORE,
+                input -> input, optimizeData);
+
         // 模版文件解压为smali
         unpackTemplateSmali(optimizeData);
         return optimizeData;
 
+    }
+
+    private static byte[] optimizeRDPJar(byte[] input) throws Exception {
+        File tempFile = File.createTempFile("rdp-tmp", ".jar");
+        FileUtils.writeByteArrayToFile(tempFile, input);
+        OptimizeBuilderClass.main(new String[]{
+                "-i",
+                tempFile.getAbsolutePath(),
+                "-t",
+                "rdp"
+        });
+        return FileUtils.readFileToByteArray(tempFile);
     }
 
     private static void unpackTemplateSmali(Map<NewConstants.BUILDER_RESOURCE_LAYOUT, byte[]> optimizeData) throws IOException {
@@ -260,7 +309,7 @@ public class OptimizeBuilderResource {
             optimizeData.put(optimizedKey, IOUtils.toByteArray(zipFile.getInputStream(optimizeResource)));
             return;
         }
-        throw new IOException("can not find resource from jar file with key: (" + rowKey + "," + optimizedKey + ")");
+        throw new IOException("can not find resource from jar file with key: (" + rowKey.getNAME() + " , " + optimizedKey.getNAME() + ")");
 
     }
 

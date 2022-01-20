@@ -1,24 +1,19 @@
 package com.virjar.ratel.builder;
 
-import net.dongliu.apk.parser.bean.ApkMeta;
-import net.dongliu.apk.parser.bean.DexClass;
-
-import org.apache.commons.cli.CommandLine;
 import org.w3c.dom.Document;
 
 import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
 import java.util.Set;
 
+/**
+ * @deprecated 已经过期，我们讲这些参数逐步迁移到BuilderContext中
+ */
+@Deprecated
 public class BuildParamMeta {
     public String packageName;
     public String appEntryClass;
-    public String appEntryClassDex;
     public String originApplicationClass;
     public String launcherActivityClass;
-    public Map<String, DexClass[]> dexClassesMap;
     public String serialNo;
     public String buildTimestamp;
     public Document androidManifestXml;
@@ -27,11 +22,7 @@ public class BuildParamMeta {
     public String newPkgName;
     public Set<String> declaredComponentClassNames = new HashSet<>();
     public String sufferKey;
-    public ApkMeta apkMeta;
-    public CommandLine cmd;
-    public Properties ratelBuildProperties;
     public Set<String> permissionDeclare = new HashSet<>();
     public Set<String> authorities = new HashSet<>();
     public Set<String> childProcess = new HashSet<>();
-    public List<String> axmlEditorCommand;
 }

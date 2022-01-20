@@ -1,15 +1,16 @@
 package com.virjar.ratel.builder.mode;
 
 
+import com.virjar.ratel.allcommon.ClassNames;
 import com.virjar.ratel.allcommon.Constants;
 import com.virjar.ratel.builder.BuildParamMeta;
-import com.virjar.ratel.builder.Param;
 import com.virjar.ratel.builder.ReNameEntry;
 import com.virjar.ratel.builder.Util;
 import com.virjar.ratel.builder.manifesthandler.AXmlEditorCmdHandler;
 import com.virjar.ratel.builder.manifesthandler.EnableDebug;
 import com.virjar.ratel.builder.manifesthandler.ReplaceApplication;
 import com.virjar.ratel.builder.manifesthandler.RequestLegacyExternalStorage;
+import com.virjar.ratel.builder.ratelentry.BuilderContext;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.io.IOUtils;
@@ -27,11 +28,10 @@ import java.util.Enumeration;
 import java.util.regex.Matcher;
 
 public class RatelPackageBuilderAppendDex {
-    public static void handleTask(File workDir, Param param, BuildParamMeta buildParamMeta,
-                                  CommandLine cmd, ZipOutputStream zos
+    public static void handleTask(File workDir, BuilderContext context, BuildParamMeta buildParamMeta, ZipOutputStream zos
     ) throws IOException {
 
-        ZipFile originAPKZip = new ZipFile(param.originApk);
+        ZipFile originAPKZip = context.infectApk.zipFile;
         Enumeration<ZipEntry> entries = originAPKZip.getEntries();
         while (entries.hasMoreElements()) {
             ZipEntry originEntry = entries.nextElement();
@@ -46,25 +46,39 @@ public class RatelPackageBuilderAppendDex {
             }
             //i will edit androidManifest.xml ,so skip it now
             if (entryName.equals(Constants.manifestFileName) &&
-                    !Constants.RATEL_MANAGER_PACKAGE.equals(buildParamMeta.apkMeta.getPackageName())) {
+                    !Constants.RATEL_MANAGER_PACKAGE.equals(context.infectApk.apkMeta.getPackageName())) {
                 zos.putNextEntry(new ZipEntry(originEntry));
                 System.out.println("edit androidManifest.xml entry");
-                zos.write(editManifestWithAXmlEditor(IOUtils.toByteArray(originAPKZip.getInputStream(originEntry)), cmd, buildParamMeta));
+                zos.write(editManifestWithAXmlEditor(IOUtils.toByteArray(originAPKZip.getInputStream(originEntry)), context.cmd, buildParamMeta, context));
                 continue;
             }
-            zos.putNextEntry(new ZipEntry(originEntry));
-            zos.write(IOUtils.toByteArray(originAPKZip.getInputStream(originEntry)));
+
+            // 可能用户排除一些arch
+            boolean needCopy = false;
+            if (!entryName.startsWith("lib") || context.arch.isEmpty()) {
+                needCopy = true;
+            } else {
+                for (String str : context.arch) {
+                    if (entryName.startsWith("lib/" + str)) {
+                        needCopy = true;
+                    }
+                }
+            }
+            if (needCopy) {
+                zos.putNextEntry(new ZipEntry(originEntry));
+                zos.write(IOUtils.toByteArray(originAPKZip.getInputStream(originEntry)));
+            }
         }
         //close
         originAPKZip.close();
 
         Util.copyAssets(zos, new File(workDir, Constants.RATEL_ENGINE_JAR), Constants.RATEL_ENGINE_JAR);
         System.out.println("copy ratel engine dex resources");
-        appendDex(zos, param.originApk, new File(workDir, Constants.ratelMultiDexBootstrapJarPath));
+        appendDex(zos, context.infectApk.file, new File(workDir, Constants.ratelMultiDexBootstrapJarPath));
         System.out.println("apk build success!!");
 
         if (buildParamMeta.originApplicationClass != null) {
-            buildParamMeta.ratelBuildProperties.setProperty(Constants.KEY_ORIGIN_APPLICATION_NAME, buildParamMeta.originApplicationClass);
+            context.ratelBuildProperties.setProperty(Constants.KEY_ORIGIN_APPLICATION_NAME, buildParamMeta.originApplicationClass);
         }
     }
 
@@ -112,7 +126,7 @@ public class RatelPackageBuilderAppendDex {
         driverApkZipFile.close();
     }
 
-    private static byte[] editManifestWithAXmlEditor(byte[] manifestFileData, CommandLine cmd, BuildParamMeta buildParamMeta) throws IOException {
+    private static byte[] editManifestWithAXmlEditor(byte[] manifestFileData, CommandLine cmd, BuildParamMeta buildParamMeta, BuilderContext context) throws IOException {
 
         AxmlReader rd = new AxmlReader(manifestFileData);
         AxmlWriter wr = new AxmlWriter();
@@ -121,18 +135,18 @@ public class RatelPackageBuilderAppendDex {
         if (cmd.hasOption('d')) {
             axmlVisitor = new EnableDebug(axmlVisitor);
         }
-        if (NumberUtils.toInt(buildParamMeta.apkMeta.getTargetSdkVersion()) >= 30) {
+        if (NumberUtils.toInt(context.infectApk.apkMeta.getTargetSdkVersion()) >= 30) {
             // axmlVisitor = new AddQueriesForPackage(axmlVisitor, Constants.RATEL_MANAGER_PACKAGE);
             // android11 包可见性，导致插件没有办法通过PMS获取，所以先使用query_all_package
-            if (!buildParamMeta.axmlEditorCommand.contains("add_permission_android.permission.QUERY_ALL_PACKAGES")) {
-                buildParamMeta.axmlEditorCommand.add("add_permission_android.permission.QUERY_ALL_PACKAGES");
+            if (!context.axmlEditorCommand.contains("add_permission_android.permission.QUERY_ALL_PACKAGES")) {
+                context.axmlEditorCommand.add("add_permission_android.permission.QUERY_ALL_PACKAGES");
             }
         }
 
-        axmlVisitor = AXmlEditorCmdHandler.handleCmd(axmlVisitor, buildParamMeta.axmlEditorCommand);
+        axmlVisitor = AXmlEditorCmdHandler.handleCmd(axmlVisitor, context.axmlEditorCommand);
 
-        axmlVisitor = new ReplaceApplication(axmlVisitor, Constants.containerMultiDexBootstrapClass);
-        if (NumberUtils.toInt(buildParamMeta.apkMeta.getTargetSdkVersion()) >= 29) {
+        axmlVisitor = new ReplaceApplication(axmlVisitor, ClassNames.INJECT_APPEND_APPLICATION.getClassName());
+        if (NumberUtils.toInt(context.infectApk.apkMeta.getTargetSdkVersion()) >= 29) {
             // android 10,无法访问内存卡，临时放开
             axmlVisitor = new RequestLegacyExternalStorage(axmlVisitor);
         }
